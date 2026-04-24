@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TwinMind Live Suggestions Copilot
 
-## Getting Started
+A production-quality AI meeting copilot that transcribes speech in real time, surfaces contextual suggestions, and provides a continuous chat assistant.
 
-First, run the development server:
+## Features
+
+- **Real-time Transcription**: Uses Groq's `whisper-large-v3` for ultra-fast audio-to-text.
+- **Contextual Suggestions**: Surfaces intelligent "Question to ask", "Talking point", "Answer", "Fact-check", and "Clarification" cards every 30 seconds using `llama-3.3-70b-versatile`.
+- **Streaming Chat**: A dedicated sidebar for deep-diving into suggestions or asking freeform questions with sub-500ms latency.
+- **Zero Infrastructure**: Built with Next.js App Router and API routes, designed for Vercel deployment.
+- **Privacy First**: API keys and settings are stored in `sessionStorage` and never touch the server-side logs.
+
+## Tech Stack
+
+- **Frontend**: Next.js 14, React 18, Tailwind CSS, Framer Motion, Lucide Icons.
+- **Inference**: Groq Cloud API (Whisper + Llama 3.3).
+- **Audio**: Web MediaRecorder API.
+
+## Setup
+
+1. **Clone & Install**:
+   ```bash
+   git clone <repo-url>
+   cd twinmind
+   npm install
+   ```
+
+2. **Run Locally**:
+   ```bash
+   npm run dev
+   ```
+
+3. **Configure**:
+   - Open the app in your browser.
+   - Click the **Gear Icon** (top right).
+   - Enter your **Groq API Key**.
+   - (Optional) Customize the prompts and context windows.
+
+4. **Start**:
+   - Click the **Microphone** icon to begin.
+
+## Deployment
+
+Deploy to Vercel in seconds:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npx vercel
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Prompt Strategy
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Suggestion Variety**: The system is tuned to avoid repetitive suggestion types (e.g., won't give 3 questions in a row). It adapts to the conversation flow: if a question was asked, it prioritizes "Answer"; if a claim was made, it prioritizes "Fact-check".
+- **Context Window**: By default, the last 5 transcript chunks (~2.5 minutes of conversation) are sent to the suggestions engine to maintain relevance without overwhelming the LLM.
+- **Streaming UX**: Chat responses are streamed token-by-token using Server-Sent Events (SSE) for immediate feedback.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Tradeoffs
 
-## Learn More
+- **Session Storage**: Settings do not persist across hard page reloads. This is intentional to ensure privacy and "clean slate" sessions.
+- **30s Audio Chunks**: Slicing audio every 30s provides a good balance between transcription latency and API overhead.
+- **JSON Export**: Provides a portable history of the transcript, suggestions, and chat.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+Built with ❤️ for high-stakes meetings.
