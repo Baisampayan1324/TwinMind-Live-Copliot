@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Settings } from '@/types';
-import { X, Save, KeyRound, SlidersHorizontal, Info } from 'lucide-react';
+import { X, Save, KeyRound, SlidersHorizontal, Info, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -19,19 +19,26 @@ export default function SettingsModal({ isOpen, settings, onSave, onClose }: Set
   const [tab, setTab] = useState<Tab>('api');
   const [local, setLocal] = useState(settings);
   const [showKey, setShowKey] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Sync local copy when settings prop changes
   useEffect(() => {
     setLocal(settings);
   }, [settings]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!local.apiKey.trim()) {
       alert('Please provide a Groq API Key to proceed.');
       return;
     }
+    setIsSaving(true);
+    // Wait for the state update to propagate
     onSave(local);
-    onClose();
+    // Small delay to ensure parent state updates before we signal close
+    setTimeout(() => {
+      setIsSaving(false);
+      onClose();
+    }, 100);
   };
 
   const hasKey = !!settings.apiKey;
@@ -50,7 +57,7 @@ export default function SettingsModal({ isOpen, settings, onSave, onClose }: Set
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.95, opacity: 0 }}
-            className="w-full max-w-xl bg-neutral-950 border border-neutral-800 overflow-hidden"
+            className="w-full max-w-2xl bg-neutral-950 border border-neutral-800 overflow-hidden"
             style={{ borderRadius: '2px' }}
           >
             {/* Modal Header */}
@@ -205,11 +212,16 @@ export default function SettingsModal({ isOpen, settings, onSave, onClose }: Set
               </p>
               <button
                 onClick={handleSave}
-                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-widest transition-colors"
+                disabled={isSaving}
+                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
                 style={{ borderRadius: '2px' }}
               >
-                <Save className="w-3.5 h-3.5" />
-                Save & Continue
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                {isSaving ? 'Saving...' : 'Save & Continue'}
               </button>
             </div>
           </motion.div>

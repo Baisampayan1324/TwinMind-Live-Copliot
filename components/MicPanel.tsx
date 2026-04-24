@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 
 interface MicPanelProps {
   isRecording: boolean;
+  isMicPending: boolean;
   isTranscribing: boolean;
   transcript: TranscriptChunk[];
   onStart: () => void;
@@ -15,7 +16,7 @@ interface MicPanelProps {
   onManualRefresh: () => void;
 }
 
-export default function MicPanel({ isRecording, isTranscribing, transcript, onStart, onStop, onManualRefresh }: MicPanelProps) {
+export default function MicPanel({ isRecording, isMicPending, isTranscribing, transcript, onStart, onStop, onManualRefresh }: MicPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,9 +31,11 @@ export default function MicPanel({ isRecording, isTranscribing, transcript, onSt
       <div className="p-6 border-b border-neutral-900 flex flex-col items-center gap-4">
         <button
           onClick={isRecording ? onStop : onStart}
+          disabled={isMicPending}
           className={cn(
             'relative w-20 h-20 flex items-center justify-center transition-all duration-500',
-            isRecording ? 'text-red-500' : 'text-neutral-500'
+            isRecording ? 'text-red-500' : 'text-neutral-500',
+            isMicPending && 'opacity-50 cursor-not-allowed'
           )}
         >
           {isRecording && (
@@ -45,15 +48,22 @@ export default function MicPanel({ isRecording, isTranscribing, transcript, onSt
           )}
           <div className={cn(
             'relative z-10 w-16 h-16 rounded-full flex items-center justify-center border-2 transition-colors',
-            isRecording ? 'border-red-500 bg-red-500/10' : 'border-neutral-800 bg-neutral-900'
+            isRecording ? 'border-red-500 bg-red-500/10' : 'border-neutral-800 bg-neutral-900',
+            isMicPending && 'border-emerald-500/50'
           )}>
-            {isRecording ? <Mic className="w-8 h-8" /> : <MicOff className="w-8 h-8" />}
+            {isMicPending ? (
+              <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+            ) : isRecording ? (
+              <Mic className="w-8 h-8" />
+            ) : (
+              <MicOff className="w-8 h-8" />
+            )}
           </div>
         </button>
 
         <div className="text-center">
           <p className={cn('text-xs font-bold uppercase tracking-widest', isRecording ? 'text-red-500' : 'text-neutral-500')}>
-            {isTranscribing ? 'Transcribing...' : isRecording ? 'Listening...' : 'Microphone Off'}
+            {isMicPending ? 'Requesting Mic...' : isTranscribing ? 'Transcribing...' : isRecording ? 'Listening...' : 'Microphone Off'}
           </p>
           {!isRecording && transcript.length === 0 && (
             <p className="text-xs text-neutral-600 mt-1">Click the mic to begin recording.</p>

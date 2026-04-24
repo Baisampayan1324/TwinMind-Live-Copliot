@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS: Settings = {
   chatPrompt: DEFAULT_CHAT_PROMPT,
   suggestionContextWindow: 5,
   chatContextWindow: 10,
-  refreshInterval: 30,
+  refreshInterval: 5,
 };
 
 function genId(): string {
@@ -56,6 +56,7 @@ export function useSession() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [isStreamingChat, setIsStreamingChat] = useState(false);
+  const [isMicPending, setIsMicPending] = useState(false);
   const [error, setError] = useState<SessionError | null>(null);
 
   // Refs to always have latest values inside callbacks — avoids stale closures entirely
@@ -87,13 +88,14 @@ export function useSession() {
   const clearError = useCallback(() => setError(null), []);
 
   // ─── Transcription ─────────────────────────────────────────────────────────
-  const transcribeBlob = useCallback(async (blob: Blob): Promise<string | null> => {
+  const transcribeBlob = useCallback(async (blob: Blob, prompt?: string): Promise<string | null> => {
     const s = settingsRef.current;
     if (!s.apiKey) return null;
 
     setIsTranscribing(true);
     const fd = new FormData();
     fd.append('audio', blob, 'audio.webm');
+    if (prompt) fd.append('prompt', prompt);
 
     try {
       const res = await fetch('/api/transcribe', {
@@ -184,13 +186,16 @@ export function useSession() {
       return;
     }
 
+    setIsMicPending(true);
     try {
       await audioCapture.startCapture(async (blob: Blob) => {
-        const text = await transcribeBlob(blob);
+        // Use last 3 chunks as prompt for Whisper context
+        const contextPrompt = transcriptRef.current.slice(-3).map(c => c.text).join(' ');
+        const text = await transcribeBlob(blob, contextPrompt);
+        
         if (text) {
           const newChunk = appendTranscript(text);
           if (newChunk) {
-            // Pass the newly constructed transcript array to avoid stale refs
             await fetchSuggestions([...transcriptRef.current, newChunk]);
           }
         }
@@ -200,6 +205,9 @@ export function useSession() {
     } catch (err: unknown) {
       const e = err as Error;
       setError({ column: 'global', message: e.message });
+      setIsRecording(false);
+    } finally {
+      setIsMicPending(false);
     }
   }, [transcribeBlob, appendTranscript, fetchSuggestions]);
 
@@ -207,7 +215,8 @@ export function useSession() {
     const remaining = audioCapture.stopCapture();
     setIsRecording(false);
     if (remaining) {
-      const text = await transcribeBlob(remaining);
+      const contextPrompt = transcriptRef.current.slice(-3).map(c => c.text).join(' ');
+      const text = await transcribeBlob(remaining, contextPrompt);
       if (text) appendTranscript(text);
     }
   }, [transcribeBlob, appendTranscript]);
@@ -217,7 +226,8 @@ export function useSession() {
     const blob = audioCapture.flushBuffer();
     let latestT = transcriptRef.current;
     if (blob) {
-      const text = await transcribeBlob(blob);
+      const contextPrompt = transcriptRef.current.slice(-3).map(c => c.text).join(' ');
+      const text = await transcribeBlob(blob, contextPrompt);
       if (text) {
         const newChunk = appendTranscript(text);
         if (newChunk) latestT = [...transcriptRef.current, newChunk];

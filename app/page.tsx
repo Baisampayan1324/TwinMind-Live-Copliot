@@ -90,6 +90,7 @@ export default function Home() {
         <section className="w-1/4 min-w-[280px] border-r border-neutral-900">
           <MicPanel
             isRecording={session.isRecording}
+            isMicPending={session.isMicPending}
             isTranscribing={session.isTranscribing}
             transcript={session.transcript}
             onStart={session.startRecording}

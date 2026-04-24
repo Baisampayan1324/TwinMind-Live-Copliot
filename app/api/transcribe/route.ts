@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
   }
 
   const audioFile = formData.get('audio') as File | null;
+  const prompt = formData.get('prompt') as string | null;
   if (!audioFile) {
     return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
   }
@@ -28,6 +29,9 @@ export async function POST(req: NextRequest) {
   groqFormData.append('model', 'whisper-large-v3');
   groqFormData.append('response_format', 'json');
   groqFormData.append('language', 'en');
+  if (prompt) {
+    groqFormData.append('prompt', prompt);
+  }
 
   try {
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
