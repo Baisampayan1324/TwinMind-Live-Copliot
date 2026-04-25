@@ -78,7 +78,7 @@ export function useSession() {
   const [error, setError] = useState<SessionError | null>(null);
   const lastSuggestionBatchKeyRef = useRef<string>('');
 
-  // Refs to always have latest values inside callbacks — avoids stale closures entirely
+  // Refs to always have latest values inside callbacks
   const transcriptRef = useRef<TranscriptChunk[]>([]);
   const settingsRef = useRef<Settings>(DEFAULT_SETTINGS);
   transcriptRef.current = transcript;
@@ -86,7 +86,12 @@ export function useSession() {
 
   // Load settings from sessionStorage on mount
   useEffect(() => {
-    setSettings(loadSettings());
+    const s = loadSettings();
+    // Default to 8s for a faster live experience if not set
+    if (!s.refreshInterval || s.refreshInterval === 5) {
+      s.refreshInterval = 8;
+    }
+    setSettings(s);
   }, []);
 
   const saveSettings = useCallback((next: Settings) => {
@@ -99,7 +104,7 @@ export function useSession() {
         const next = {
           ...prev,
           ...partial,
-          refreshInterval: Math.max(5, Number(partial.refreshInterval ?? prev.refreshInterval) || 5),
+          refreshInterval: Math.max(5, Number(partial.refreshInterval ?? prev.refreshInterval) || 8),
         };
         saveSettings(next);
         return next;
@@ -112,7 +117,7 @@ export function useSession() {
 
   // ─── Transcription ─────────────────────────────────────────────────────────
   const transcribeBlob = useCallback(
-    async (blob: Blob): Promise<string | null> => {
+    async (blob: Blob, contextPrompt?: string): Promise<string | null> => {
     const s = settingsRef.current;
     if (!s.apiKey) return null;
 
@@ -120,6 +125,9 @@ export function useSession() {
     const fd = new FormData();
     const ext = mimeTypeToExtension(blob.type || 'audio/webm');
     fd.append('audio', blob, `audio.${ext}`);
+    if (contextPrompt) {
+      fd.append('prompt', contextPrompt);
+    }
 
     try {
       const res = await fetch('/api/transcribe', {
@@ -221,9 +229,12 @@ export function useSession() {
 
     setIsMicPending(true);
     try {
+      const intervalMs = Math.max(5, Number(s.refreshInterval) || 8) * 1000;
       await audioCapture.startCapture(
         async (blob: Blob) => {
-          const text = await transcribeBlob(blob);
+          // Get last 3 chunks as prompt for context
+          const lastChunks = transcriptRef.current.slice(-3).map(c => c.text).join(' ');
+          const text = await transcribeBlob(blob, lastChunks);
           if (text) {
             const newChunk = appendTranscript(text);
             if (newChunk) {
@@ -231,7 +242,7 @@ export function useSession() {
             }
           }
         },
-        5000
+        intervalMs
       );
       setIsRecording(true);
       setError(null);
@@ -273,11 +284,17 @@ export function useSession() {
       const t = transcriptRef.current;
       if (!s.apiKey || !text.trim()) return;
 
+      const streamId = genId();
       const userMsg: ChatMessage = { role: 'user', content: text.trim(), timestamp: nowISO() };
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: nowISO() };
+      const assistantMsg: ChatMessage = { 
+        role: 'assistant', 
+        content: '', 
+        timestamp: nowISO(),
+        id: streamId 
+      };
 
       setChatMessages((prev) => [...prev, userMsg, assistantMsg]);
-      setIsStreamingChat(true);
+      setActiveStreams(n => n + 1);
 
       try {
         const res = await fetch('/api/chat', {
@@ -300,7 +317,7 @@ export function useSession() {
         if (!res.ok) {
           const data = await res.json();
           setError({ column: 'chat', message: data.error ?? 'Chat failed' });
-          setChatMessages((prev) => prev.slice(0, -1)); // remove empty assistant msg
+          setChatMessages((prev) => prev.filter(m => m.id !== streamId));
           return;
         }
 
@@ -329,8 +346,10 @@ export function useSession() {
               }
               accumulated += token;
               setChatMessages((prev) => {
+                const idx = prev.findIndex(m => m.id === streamId);
+                if (idx === -1) return prev;
                 const next = [...prev];
-                next[next.length - 1] = { ...next[next.length - 1], content: accumulated };
+                next[idx] = { ...next[idx], content: accumulated };
                 return next;
               });
             } catch {

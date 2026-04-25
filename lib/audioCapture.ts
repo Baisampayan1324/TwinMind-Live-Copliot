@@ -1,9 +1,6 @@
 /**
  * audioCapture.ts
- * MediaRecorder abstraction that slices audio into fixed-duration Blob chunks.
- * No React dependencies — pure browser API.
- * Ported from twinmind reference: module-level state avoids class instantiation
- * bugs and supports flushBuffer() for manual refresh without stopping the recorder.
+ * MediaRecorder abstraction that ensures every segment is a valid standalone media file.
  */
 
 type OnChunkCallback = (blob: Blob) => void;
@@ -11,74 +8,87 @@ type OnChunkCallback = (blob: Blob) => void;
 let mediaRecorder: MediaRecorder | null = null;
 let stream: MediaStream | null = null;
 let chunkBuffer: Blob[] = [];
-let intervalHandle: ReturnType<typeof setInterval> | null = null;
 let onChunkCb: OnChunkCallback | null = null;
 let activeMimeType = 'audio/webm';
+let captureActive = false;
+let currentIntervalMs = 30000;
+let stopTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-/**
- * Starts audio capture. Calls onChunk every intervalMs milliseconds.
- * Throws a user-friendly Error if mic access is denied.
- * Default interval: 30000ms (30 seconds) for meeting transcription.
- */
 export async function startCapture(
   onChunk: OnChunkCallback,
   intervalMs: number = 30000
 ): Promise<void> {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
+  if (captureActive) return;
 
   onChunkCb = onChunk;
+  currentIntervalMs = intervalMs;
+  captureActive = true;
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   } catch (err: unknown) {
+    captureActive = false;
     const error = err as DOMException;
     if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      throw new Error(
-        'Microphone access denied. Please allow microphone access in your browser settings and reload the page.'
-      );
-    }
-    if (error.name === 'NotFoundError') {
-      throw new Error('No microphone detected. Please connect a microphone and try again.');
+      throw new Error('Microphone access denied. Please allow mic access in settings.');
     }
     throw new Error(`Microphone error: ${error.message}`);
   }
 
-  // Prefer webm/opus; fall back to whatever the browser supports
+  _initRecorder();
+}
+
+function _initRecorder() {
+  if (!captureActive || !stream) return;
+
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
-    : MediaRecorder.isTypeSupported('audio/webm')
-    ? 'audio/webm'
-    : '';
+    : 'audio/webm';
 
-  mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  activeMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+  mediaRecorder = new MediaRecorder(stream, { mimeType });
+  activeMimeType = mediaRecorder.mimeType;
   chunkBuffer = [];
 
   mediaRecorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) {
-      if (e.data.type) activeMimeType = e.data.type;
       chunkBuffer.push(e.data);
     }
   };
 
-  mediaRecorder.onerror = (e) => {
-    console.error('MediaRecorder error:', e);
+  mediaRecorder.onstop = () => {
+    if (chunkBuffer.length > 0) {
+      const blob = new Blob(chunkBuffer, { type: activeMimeType });
+      onChunkCb?.(blob);
+      chunkBuffer = [];
+    }
+    
+    // Clear any existing timeout to prevent double-stops
+    if (stopTimeoutHandle) {
+      clearTimeout(stopTimeoutHandle);
+      stopTimeoutHandle = null;
+    }
+
+    // Restart if we are still supposed to be capturing
+    if (captureActive) {
+      setTimeout(() => _initRecorder(), 50); // slight gap for browser stability
+    }
   };
 
-  mediaRecorder.start(1000); // collect data every 1s for smooth flushing
+  mediaRecorder.start();
 
-  // Fire onChunk every intervalMs
-  intervalHandle = setInterval(() => {
-    const blob = _flush();
-    if (blob) onChunkCb?.(blob);
-  }, intervalMs);
+  // Schedule the next stop
+  stopTimeoutHandle = setTimeout(() => {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    }
+  }, currentIntervalMs);
 }
 
-/** Stop recording. Returns any remaining buffered audio. */
 export function stopCapture(): Blob | null {
-  if (intervalHandle) {
-    clearInterval(intervalHandle);
-    intervalHandle = null;
+  captureActive = false;
+  if (stopTimeoutHandle) {
+    clearTimeout(stopTimeoutHandle);
+    stopTimeoutHandle = null;
   }
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
@@ -90,26 +100,16 @@ export function stopCapture(): Blob | null {
   const remaining = chunkBuffer.length > 0 ? new Blob(chunkBuffer, { type: activeMimeType }) : null;
   chunkBuffer = [];
   mediaRecorder = null;
-  activeMimeType = 'audio/webm';
   return remaining;
 }
 
-/**
- * Immediately flush the current buffer and reset it.
- * Returns the accumulated audio blob (or null if buffer is empty).
- * Used for manual refresh without waiting for the timer.
- */
 export function flushBuffer(): Blob | null {
-  return _flush();
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop(); // Triggers onstop -> onChunkCb
+  }
+  return null;
 }
 
 export function isCapturing(): boolean {
-  return mediaRecorder !== null && mediaRecorder.state === 'recording';
-}
-
-function _flush(): Blob | null {
-  if (chunkBuffer.length === 0) return null;
-  const blob = new Blob(chunkBuffer, { type: activeMimeType });
-  chunkBuffer = [];
-  return blob;
+  return captureActive;
 }

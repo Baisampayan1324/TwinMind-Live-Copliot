@@ -50,6 +50,8 @@ export async function POST(req: NextRequest) {
   groqFormData.append('model', 'whisper-large-v3');
   groqFormData.append('response_format', 'json');
   groqFormData.append('language', 'en');
+  
+  // Use previous context to reduce hallucinations
   if (prompt) {
     groqFormData.append('prompt', prompt);
   }
@@ -65,19 +67,26 @@ export async function POST(req: NextRequest) {
       const error = await res.json().catch(() => ({}));
       const message = (error as { error?: { message?: string } })?.error?.message ?? '';
 
-      // Whisper can return 400 for effectively empty audio; keep UX smooth for that case only.
+      console.error(`Groq Transcription Error (${res.status}):`, message);
+
       const looksLikeSilence = /empty|silence|silent|no speech|too short/i.test(message);
       if (res.status === 400 && looksLikeSilence) {
         return NextResponse.json({ text: '' });
       }
 
-      if (res.status === 401) return NextResponse.json({ error: 'Invalid API key — Groq rejected it' }, { status: 401 });
-      if (res.status === 429) return NextResponse.json({ error: 'Rate limited', retryAfter: 10 }, { status: 429 });
       return NextResponse.json({ error: message || 'Transcription failed' }, { status: res.status });
     }
 
     const result = await res.json();
-    return NextResponse.json({ text: result.text ?? '' });
+    let text = result.text ?? '';
+
+    // Filter common Whisper hallucinations in quiet rooms
+    const hallucinations = [/^thank you[.\s]*$/i, /^thanks for watching[.\s]*$/i, /^you$/i];
+    if (hallucinations.some(h => h.test(text.trim()))) {
+      text = '';
+    }
+
+    return NextResponse.json({ text });
   } catch (err: unknown) {
     console.error('Whisper error:', err);
     return NextResponse.json({ error: 'Network error during transcription' }, { status: 502 });
