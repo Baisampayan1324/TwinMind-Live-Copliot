@@ -1,5 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+function inferAudioType(file: File): { type: string; extension: string } {
+  const name = file.name.toLowerCase();
+  const type = file.type.toLowerCase();
+  const source = `${name} ${type}`;
+
+  if (source.includes('webm')) return { type: 'audio/webm', extension: 'webm' };
+  if (source.includes('ogg')) return { type: 'audio/ogg', extension: 'ogg' };
+  if (source.includes('mp4') || source.includes('m4a')) return { type: 'audio/mp4', extension: 'm4a' };
+  if (source.includes('mpeg') || source.includes('mp3')) return { type: 'audio/mpeg', extension: 'mp3' };
+  if (source.includes('wav')) return { type: 'audio/wav', extension: 'wav' };
+
+  return { type: 'audio/webm', extension: 'webm' };
+}
+
+async function normalizeAudioFile(file: File): Promise<File> {
+  const { type, extension } = inferAudioType(file);
+  const bytes = await file.arrayBuffer();
+  return new File([bytes], `audio.${extension}`, { type });
+}
+
 export async function POST(req: NextRequest) {
   const apiKey = req.headers.get('X-Groq-Key') ?? req.headers.get('x-groq-key');
   if (!apiKey) {
@@ -25,7 +45,8 @@ export async function POST(req: NextRequest) {
   }
 
   const groqFormData = new FormData();
-  groqFormData.append('file', audioFile, audioFile.name || 'audio.webm');
+  const normalizedAudioFile = await normalizeAudioFile(audioFile);
+  groqFormData.append('file', normalizedAudioFile, normalizedAudioFile.name);
   groqFormData.append('model', 'whisper-large-v3');
   groqFormData.append('response_format', 'json');
   groqFormData.append('language', 'en');
