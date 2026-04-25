@@ -7,12 +7,77 @@ interface RequestBody {
   prompt: string;
 }
 
+const ALLOWED_TYPES = new Set<Suggestion['type']>([
+  'Question to ask',
+  'Talking point',
+  'Answer',
+  'Fact-check',
+  'Clarification',
+]);
+
 function formatTranscript(chunks: TranscriptChunk[]): string {
   return chunks.map((c) => `[${c.timestamp}] ${c.text}`).join('\n');
 }
 
 function stripMarkdownFences(text: string): string {
   return text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+}
+
+function normalizeType(typeValue: unknown): Suggestion['type'] {
+  const type = String(typeValue ?? '').trim();
+  if (ALLOWED_TYPES.has(type as Suggestion['type'])) {
+    return type as Suggestion['type'];
+  }
+
+  const lower = type.toLowerCase();
+  if (lower.includes('question')) return 'Question to ask';
+  if (lower.includes('talk')) return 'Talking point';
+  if (lower.includes('answer')) return 'Answer';
+  if (lower.includes('fact')) return 'Fact-check';
+  if (lower.includes('clarif')) return 'Clarification';
+  return 'Talking point';
+}
+
+function extractSuggestions(parsed: unknown): Suggestion[] {
+  const list = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' && parsed !== null
+    ? (
+        (parsed as { suggestions?: unknown[] }).suggestions ??
+        (parsed as { items?: unknown[] }).items ??
+        (parsed as { data?: unknown[] }).data ??
+        []
+      )
+    : [];
+
+  if (!Array.isArray(list)) return [];
+
+  return list
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) return null;
+
+      const obj = item as {
+        type?: unknown;
+        headline?: unknown;
+        title?: unknown;
+        preview?: unknown;
+        description?: unknown;
+      };
+
+      const headline = String(obj.headline ?? obj.title ?? '').trim();
+      const preview = String(obj.preview ?? obj.description ?? '').trim();
+      if (!headline || !preview) return null;
+
+      const normalized: Suggestion = {
+        type: normalizeType(obj.type),
+        headline,
+        preview,
+      };
+
+      return normalized;
+    })
+    .filter((s): s is Suggestion => s !== null)
+    .slice(0, 3);
 }
 
 async function callGroq(apiKey: string, prompt: string): Promise<Suggestion[] | null> {
@@ -42,15 +107,15 @@ async function callGroq(apiKey: string, prompt: string): Promise<Suggestion[] | 
 
   try {
     const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed) && parsed.length === 3) return parsed as Suggestion[];
-    return null;
+    const suggestions = extractSuggestions(parsed);
+    return suggestions.length > 0 ? suggestions : null;
   } catch {
     return null;
   }
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = req.headers.get('X-Groq-Key');
+  const apiKey = req.headers.get('X-Groq-Key') ?? req.headers.get('x-groq-key');
   if (!apiKey) {
     return NextResponse.json({ error: 'Missing Groq API key' }, { status: 401 });
   }

@@ -1,7 +1,7 @@
 'use client';
 
 import { TranscriptChunk } from '@/types';
-import { Mic, MicOff, AlertCircle, RefreshCw } from 'lucide-react';
+import { Mic, MicOff, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
@@ -11,19 +11,20 @@ interface MicPanelProps {
   isMicPending: boolean;
   isTranscribing: boolean;
   transcript: TranscriptChunk[];
+  interimTranscript: string;
   onStart: () => void;
   onStop: () => void;
   onManualRefresh: () => void;
 }
 
-export default function MicPanel({ isRecording, isMicPending, isTranscribing, transcript, onStart, onStop, onManualRefresh }: MicPanelProps) {
+export default function MicPanel({ isRecording, isMicPending, isTranscribing, transcript, interimTranscript, onStart, onStop, onManualRefresh }: MicPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [transcript]);
+  }, [transcript, interimTranscript]);
 
   return (
     <div className="flex flex-col h-full bg-neutral-950">
@@ -107,6 +108,25 @@ export default function MicPanel({ isRecording, isMicPending, isTranscribing, tr
                 </div>
               </motion.div>
             ))}
+            
+            {/* Live interim text rendering as they speak */}
+            {isRecording && interimTranscript && (
+              <motion.div
+                key="interim"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="group"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-[10px] font-mono text-emerald-700/50 mt-0.5 min-w-[52px]">
+                    LIVE
+                  </span>
+                  <p className="text-sm text-emerald-400/80 leading-relaxed italic">
+                    {interimTranscript}
+                  </p>
+                </div>
+              </motion.div>
+            )}
           </AnimatePresence>
 
           {transcript.length === 0 && !isRecording && (

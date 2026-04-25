@@ -1,18 +1,31 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { TranscriptChunk, SuggestionBatch, Suggestion, ChatMessage, Settings, SessionExport } from '@/types';
-import { DEFAULT_SUGGESTION_PROMPT, DEFAULT_DETAIL_PROMPT, DEFAULT_CHAT_PROMPT } from './prompts';
-import * as audioCapture from '@/lib/audioCapture';
+"use client";
 
-const SESSION_STORAGE_KEY = 'twinmind_settings';
+import { useState, useCallback, useRef, useEffect } from "react";
+import {
+  TranscriptChunk,
+  SuggestionBatch,
+  Suggestion,
+  ChatMessage,
+  Settings,
+  SessionExport,
+} from "@/types";
+import {
+  DEFAULT_SUGGESTION_PROMPT,
+  DEFAULT_DETAIL_PROMPT,
+  DEFAULT_CHAT_PROMPT,
+} from "@/lib/prompts";
+import * as audioCapture from "@/lib/audioCapture";
+
+const SESSION_STORAGE_KEY = "twinmind_settings";
 
 const DEFAULT_SETTINGS: Settings = {
-  apiKey: '',
+  apiKey: "",
   suggestionPrompt: DEFAULT_SUGGESTION_PROMPT,
   detailPrompt: DEFAULT_DETAIL_PROMPT,
   chatPrompt: DEFAULT_CHAT_PROMPT,
   suggestionContextWindow: 5,
   chatContextWindow: 10,
-  refreshInterval: 5,
+  refreshInterval: 30,
 };
 
 function genId(): string {
@@ -23,34 +36,19 @@ function nowISO(): string {
   return new Date().toISOString();
 }
 
-function mimeTypeToExtension(mimeType: string): string {
-  const lower = mimeType.toLowerCase();
-  if (lower.includes('webm')) return 'webm';
-  if (lower.includes('ogg')) return 'ogg';
-  if (lower.includes('mp4')) return 'mp4';
-  if (lower.includes('mpeg') || lower.includes('mp3')) return 'mp3';
-  if (lower.includes('wav')) return 'wav';
-  return 'webm';
-}
-
 function loadSettings(): Settings {
-  if (typeof window === 'undefined') return DEFAULT_SETTINGS;
+  if (typeof window === "undefined") return DEFAULT_SETTINGS;
   try {
     const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    const merged = { ...DEFAULT_SETTINGS, ...parsed };
-    return {
-      ...merged,
-      refreshInterval: Math.max(5, Number(merged.refreshInterval) || DEFAULT_SETTINGS.refreshInterval),
-    };
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
   } catch {
     return DEFAULT_SETTINGS;
   }
 }
 
 export interface SessionError {
-  column: 'transcript' | 'suggestions' | 'chat' | 'global';
+  column: "transcript" | "suggestions" | "chat" | "global";
   message: string;
   retryAfter?: number;
 }
@@ -58,17 +56,12 @@ export interface SessionError {
 export function useSession() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [isRecording, setIsRecording] = useState(false);
-  const [isMicPending, setIsMicPending] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptChunk[]>([]);
   const [suggestionBatches, setSuggestionBatches] = useState<SuggestionBatch[]>([]);
-  const recentSuggestionKeysRef = useRef<string[]>([]);
-  const recognitionRef = useRef<any>(null);
-  const [interimTranscript, setInterimTranscript] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
-      role: 'assistant',
-      content:
-        "Hi! I'm TwinMind. Start recording and I'll surface live suggestions as your meeting progresses. Click any suggestion card for a detailed answer, or ask me anything directly.",
+      role: "assistant",
+      content: "Hi! I'm TwinMind. Start recording and I'll surface live suggestions as your meeting progresses. Click any suggestion card for a detailed answer, or ask me anything directly.",
       timestamp: nowISO(),
     },
   ]);
@@ -76,9 +69,8 @@ export function useSession() {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [isStreamingChat, setIsStreamingChat] = useState(false);
   const [error, setError] = useState<SessionError | null>(null);
-  const lastSuggestionBatchKeyRef = useRef<string>('');
 
-  // Refs to always have latest values inside callbacks — avoids stale closures entirely
+  // Refs to always have latest values inside callbacks without stale closures
   const transcriptRef = useRef<TranscriptChunk[]>([]);
   const settingsRef = useRef<Settings>(DEFAULT_SETTINGS);
   transcriptRef.current = transcript;
@@ -96,11 +88,7 @@ export function useSession() {
   const updateSettings = useCallback(
     (partial: Partial<Settings>) => {
       setSettings((prev) => {
-        const next = {
-          ...prev,
-          ...partial,
-          refreshInterval: Math.max(5, Number(partial.refreshInterval ?? prev.refreshInterval) || 5),
-        };
+        const next = { ...prev, ...partial };
         saveSettings(next);
         return next;
       });
@@ -113,38 +101,35 @@ export function useSession() {
   // ─── Transcription ─────────────────────────────────────────────────────────
   const transcribeBlob = useCallback(
     async (blob: Blob): Promise<string | null> => {
-    const s = settingsRef.current;
-    if (!s.apiKey) return null;
+      const s = settingsRef.current;
+      if (!s.apiKey) return null;
 
-    setIsTranscribing(true);
-    const fd = new FormData();
-    const ext = mimeTypeToExtension(blob.type || 'audio/webm');
-    fd.append('audio', blob, `audio.${ext}`);
+      setIsTranscribing(true);
+      const fd = new FormData();
+      fd.append("audio", blob, "audio.webm");
 
-    try {
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: { 'X-Groq-Key': s.apiKey },
-        body: fd,
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (res.status === 429) {
-          setError({ column: 'transcript', message: `Rate limited. Retrying in ${data.retryAfter ?? 10}s.`, retryAfter: data.retryAfter });
-        } else if (res.status === 401) {
-          setError({ column: 'global', message: 'Invalid API key. Please check your Groq key in Settings.' });
-        } else {
-          setError({ column: 'transcript', message: data.error ?? 'Transcription failed' });
+      try {
+        const res = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: { "x-groq-key": s.apiKey },
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 429) {
+            setError({ column: "transcript", message: `Rate limited. Retrying in ${data.retryAfter ?? 10}s.`, retryAfter: data.retryAfter });
+          } else {
+            setError({ column: "transcript", message: data.error ?? "Transcription failed" });
+          }
+          return null;
         }
+        return data.text ?? "";
+      } catch {
+        setError({ column: "transcript", message: "Network error during transcription." });
         return null;
+      } finally {
+        setIsTranscribing(false);
       }
-      return data.text ?? '';
-    } catch {
-      setError({ column: 'transcript', message: 'Network error during transcription.' });
-      return null;
-    } finally {
-      setIsTranscribing(false);
-    }
     },
     []
   );
@@ -153,7 +138,7 @@ export function useSession() {
     if (!text.trim()) return null;
     const chunk: TranscriptChunk = {
       id: genId(),
-      timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      timestamp: new Date().toLocaleTimeString("en-US", { hour12: false }),
       text: text.trim(),
     };
     setTranscript((prev) => [...prev, chunk]);
@@ -168,11 +153,11 @@ export function useSession() {
 
     setIsLoadingSuggestions(true);
     try {
-      const res = await fetch('/api/suggestions', {
-        method: 'POST',
+      const res = await fetch("/api/suggestions", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'X-Groq-Key': s.apiKey,
+          "Content-Type": "application/json",
+          "x-groq-key": s.apiKey,
         },
         body: JSON.stringify({
           transcript: t,
@@ -183,11 +168,9 @@ export function useSession() {
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 429) {
-          setError({ column: 'suggestions', message: `Rate limited. Retrying in ${data.retryAfter ?? 10}s.`, retryAfter: data.retryAfter });
-        } else if (res.status === 401) {
-          setError({ column: 'global', message: 'Invalid API key. Please check your Groq key in Settings.' });
+          setError({ column: "suggestions", message: `Rate limited. Retrying in ${data.retryAfter ?? 10}s.`, retryAfter: data.retryAfter });
         } else {
-          setError({ column: 'suggestions', message: data.error ?? 'Failed to get suggestions' });
+          setError({ column: "suggestions", message: data.error ?? "Failed to get suggestions" });
         }
         return;
       }
@@ -196,16 +179,9 @@ export function useSession() {
         generatedAt: nowISO(),
         suggestions: data.suggestions,
       };
-      const batchKey = batch.suggestions.map((s) => `${s.type}::${s.headline}`).join('||');
-      if (!batchKey || batchKey === lastSuggestionBatchKeyRef.current) {
-        return;
-      }
-
-      lastSuggestionBatchKeyRef.current = batchKey;
-      recentSuggestionKeysRef.current = [...batch.suggestions.map((s) => `${s.type}::${s.headline}`), ...recentSuggestionKeysRef.current].slice(0, 30);
       setSuggestionBatches((prev) => [batch, ...prev]);
     } catch {
-      setError({ column: 'suggestions', message: 'Network error fetching suggestions.' });
+      setError({ column: "suggestions", message: "Network error fetching suggestions." });
     } finally {
       setIsLoadingSuggestions(false);
     }
@@ -215,11 +191,10 @@ export function useSession() {
   const startRecording = useCallback(async () => {
     const s = settingsRef.current;
     if (!s.apiKey) {
-      setError({ column: 'global', message: 'Please set your Groq API key in Settings first.' });
+      setError({ column: "global", message: "Please set your Groq API key in Settings first." });
       return;
     }
 
-    setIsMicPending(true);
     try {
       await audioCapture.startCapture(
         async (blob: Blob) => {
@@ -227,19 +202,18 @@ export function useSession() {
           if (text) {
             const newChunk = appendTranscript(text);
             if (newChunk) {
+              // Pass the newly constructed transcript array to avoid stale refs
               await fetchSuggestions([...transcriptRef.current, newChunk]);
             }
           }
         },
-        5000
+        s.refreshInterval * 1000
       );
       setIsRecording(true);
       setError(null);
     } catch (err: unknown) {
       const e = err as Error;
-      setError({ column: 'global', message: e.message });
-    } finally {
-      setIsMicPending(false);
+      setError({ column: "global", message: e.message });
     }
   }, [transcribeBlob, appendTranscript, fetchSuggestions]);
 
@@ -252,7 +226,7 @@ export function useSession() {
     }
   }, [transcribeBlob, appendTranscript]);
 
-  // Manual refresh: flush current audio buffer → transcribe → suggest
+  // Manual refresh: flush current audio → transcribe → suggest
   const manualRefresh = useCallback(async () => {
     const blob = audioCapture.flushBuffer();
     let latestT = transcriptRef.current;
@@ -268,26 +242,42 @@ export function useSession() {
 
   // ─── Chat ──────────────────────────────────────────────────────────────────
   const sendChatMessage = useCallback(
-    async (text: string, opts?: { isSuggestionClick?: boolean; suggestionHeadline?: string }) => {
+    async (
+      text: string,
+      opts?: { isSuggestionClick?: boolean; suggestionHeadline?: string }
+    ) => {
       const s = settingsRef.current;
       const t = transcriptRef.current;
       if (!s.apiKey || !text.trim()) return;
 
-      const userMsg: ChatMessage = { role: 'user', content: text.trim(), timestamp: nowISO() };
-      const assistantMsg: ChatMessage = { role: 'assistant', content: '', timestamp: nowISO() };
+      const userMsg: ChatMessage = { role: "user", content: text.trim(), timestamp: nowISO() };
 
-      setChatMessages((prev) => [...prev, userMsg, assistantMsg]);
+      // Add placeholder assistant message for streaming
+      const assistantId = genId();
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: "",
+        timestamp: nowISO(),
+      };
+
+      setChatMessages((prev) => {
+        const next = [...prev, userMsg, assistantMsg];
+        // tag assistant msg so we can update it
+        (next[next.length - 1] as ChatMessage & { _id?: string })._id = assistantId;
+        return next;
+      });
+
       setIsStreamingChat(true);
 
       try {
-        const res = await fetch('/api/chat', {
-          method: 'POST',
+        const res = await fetch("/api/chat", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
-            'X-Groq-Key': s.apiKey,
+            "Content-Type": "application/json",
+            "x-groq-key": s.apiKey,
           },
           body: JSON.stringify({
-            messages: [...chatMessages, userMsg],
+            messages: [...(chatMessages), userMsg],
             transcript: t,
             prompt: s.chatPrompt,
             contextWindow: s.chatContextWindow,
@@ -299,7 +289,7 @@ export function useSession() {
 
         if (!res.ok) {
           const data = await res.json();
-          setError({ column: 'chat', message: data.error ?? 'Chat failed' });
+          setError({ column: "chat", message: data.error ?? "Chat failed" });
           setChatMessages((prev) => prev.slice(0, -1)); // remove empty assistant msg
           return;
         }
@@ -309,25 +299,19 @@ export function useSession() {
         const decoder = new TextDecoder();
         if (!reader) return;
 
-        let accumulated = '';
+        let accumulated = "";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           const raw = decoder.decode(value);
-          const lines = raw.split('\n').filter((l) => l.startsWith('data: '));
+          const lines = raw.split("\n").filter((l) => l.startsWith("data: "));
           for (const line of lines) {
             const payload = line.slice(6).trim();
-            if (payload === '[DONE]') break;
+            if (payload === "[DONE]") break;
             try {
-              // Handle both raw-string tokens and OpenAI-format SSE
-              let token = '';
-              try {
-                token = JSON.parse(payload) as string;
-              } catch {
-                const json = JSON.parse(payload);
-                token = json.choices?.[0]?.delta?.content ?? '';
-              }
+              const token = JSON.parse(payload) as string;
               accumulated += token;
+              // Update the last (streaming) assistant message
               setChatMessages((prev) => {
                 const next = [...prev];
                 next[next.length - 1] = { ...next[next.length - 1], content: accumulated };
@@ -339,7 +323,7 @@ export function useSession() {
           }
         }
       } catch {
-        setError({ column: 'chat', message: 'Network error during chat.' });
+        setError({ column: "chat", message: "Network error during chat." });
       } finally {
         setIsStreamingChat(false);
       }
@@ -359,17 +343,17 @@ export function useSession() {
 
   // ─── Export ────────────────────────────────────────────────────────────────
   const exportSession = useCallback(() => {
-    const data = {
+    const data: SessionExport = {
       exportedAt: nowISO(),
       transcript,
       suggestionBatches,
       chat: chatMessages,
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `session_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    a.download = `session_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, [transcript, suggestionBatches, chatMessages]);
@@ -378,13 +362,11 @@ export function useSession() {
     settings,
     isRecording,
     transcript,
-    interimTranscript,
     suggestionBatches,
     chatMessages,
     isTranscribing,
     isLoadingSuggestions,
     isStreamingChat,
-    isMicPending,
     error,
     clearError,
     startRecording,
@@ -396,4 +378,3 @@ export function useSession() {
     exportSession,
   };
 }
-

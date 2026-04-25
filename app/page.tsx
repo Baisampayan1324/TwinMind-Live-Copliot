@@ -93,6 +93,7 @@ export default function Home() {
             isMicPending={session.isMicPending}
             isTranscribing={session.isTranscribing}
             transcript={session.transcript}
+            interimTranscript={session.interimTranscript}
             onStart={session.startRecording}
             onStop={session.stopRecording}
             onManualRefresh={session.manualRefresh}
@@ -123,12 +124,10 @@ export default function Home() {
       {/* Settings Modal */}
       <SettingsModal
         isOpen={settingsOpen}
+        forceOpen={!session.settings.apiKey}
         settings={session.settings}
         onSave={session.updateSettings}
-        onClose={() => {
-          if (!session.settings.apiKey) return; // prevent closing without a key
-          setSettingsOpen(false);
-        }}
+        onClose={() => setSettingsOpen(false)}
       />
     </main>
   );

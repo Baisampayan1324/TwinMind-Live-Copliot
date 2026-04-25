@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
-  const apiKey = req.headers.get('X-Groq-Key');
+  const apiKey = req.headers.get('X-Groq-Key') ?? req.headers.get('x-groq-key');
   if (!apiKey) {
     return NextResponse.json({ error: 'Missing Groq API key' }, { status: 401 });
   }
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
 
   const groqFormData = new FormData();
-  groqFormData.append('file', audioFile, 'audio.webm');
+  groqFormData.append('file', audioFile, audioFile.name || 'audio.webm');
   groqFormData.append('model', 'whisper-large-v3');
   groqFormData.append('response_format', 'json');
   groqFormData.append('language', 'en');
@@ -42,11 +42,17 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({}));
-      // Whisper rejects empty/silent blobs with 400 — treat as empty text
-      if (res.status === 400) return NextResponse.json({ text: '' });
+      const message = (error as { error?: { message?: string } })?.error?.message ?? '';
+
+      // Whisper can return 400 for effectively empty audio; keep UX smooth for that case only.
+      const looksLikeSilence = /empty|silence|silent|no speech|too short/i.test(message);
+      if (res.status === 400 && looksLikeSilence) {
+        return NextResponse.json({ text: '' });
+      }
+
       if (res.status === 401) return NextResponse.json({ error: 'Invalid API key — Groq rejected it' }, { status: 401 });
       if (res.status === 429) return NextResponse.json({ error: 'Rate limited', retryAfter: 10 }, { status: 429 });
-      return NextResponse.json({ error: error?.error?.message ?? 'Transcription failed' }, { status: res.status });
+      return NextResponse.json({ error: message || 'Transcription failed' }, { status: res.status });
     }
 
     const result = await res.json();

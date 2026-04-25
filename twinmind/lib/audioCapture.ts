@@ -2,8 +2,6 @@
  * audioCapture.ts
  * MediaRecorder abstraction that slices audio into fixed-duration Blob chunks.
  * No React dependencies — pure browser API.
- * Ported from twinmind reference: module-level state avoids class instantiation
- * bugs and supports flushBuffer() for manual refresh without stopping the recorder.
  */
 
 type OnChunkCallback = (blob: Blob) => void;
@@ -13,18 +11,16 @@ let stream: MediaStream | null = null;
 let chunkBuffer: Blob[] = [];
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 let onChunkCb: OnChunkCallback | null = null;
-let activeMimeType = 'audio/webm';
 
 /**
  * Starts audio capture. Calls onChunk every intervalMs milliseconds.
  * Throws a user-friendly Error if mic access is denied.
- * Default interval: 30000ms (30 seconds) for meeting transcription.
  */
 export async function startCapture(
   onChunk: OnChunkCallback,
   intervalMs: number = 30000
 ): Promise<void> {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
+  if (mediaRecorder && mediaRecorder.state !== "inactive") return;
 
   onChunkCb = onChunk;
 
@@ -32,37 +28,35 @@ export async function startCapture(
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   } catch (err: unknown) {
     const error = err as DOMException;
-    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+    if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
       throw new Error(
-        'Microphone access denied. Please allow microphone access in your browser settings and reload the page.'
+        "Microphone access denied. Please allow microphone access in your browser settings and reload the page."
       );
     }
-    if (error.name === 'NotFoundError') {
-      throw new Error('No microphone detected. Please connect a microphone and try again.');
+    if (error.name === "NotFoundError") {
+      throw new Error("No microphone detected. Please connect a microphone and try again.");
     }
     throw new Error(`Microphone error: ${error.message}`);
   }
 
   // Prefer webm/opus; fall back to whatever the browser supports
-  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-    ? 'audio/webm;codecs=opus'
-    : MediaRecorder.isTypeSupported('audio/webm')
-    ? 'audio/webm'
-    : '';
+  const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+    ? "audio/webm;codecs=opus"
+    : MediaRecorder.isTypeSupported("audio/webm")
+    ? "audio/webm"
+    : "";
 
   mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  activeMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
   chunkBuffer = [];
 
   mediaRecorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) {
-      if (e.data.type) activeMimeType = e.data.type;
       chunkBuffer.push(e.data);
     }
   };
 
   mediaRecorder.onerror = (e) => {
-    console.error('MediaRecorder error:', e);
+    console.error("MediaRecorder error:", e);
   };
 
   mediaRecorder.start(1000); // collect data every 1s for smooth flushing
@@ -80,17 +74,16 @@ export function stopCapture(): Blob | null {
     clearInterval(intervalHandle);
     intervalHandle = null;
   }
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
     mediaRecorder.stop();
   }
   if (stream) {
     stream.getTracks().forEach((t) => t.stop());
     stream = null;
   }
-  const remaining = chunkBuffer.length > 0 ? new Blob(chunkBuffer, { type: activeMimeType }) : null;
+  const remaining = chunkBuffer.length > 0 ? new Blob(chunkBuffer, { type: "audio/webm" }) : null;
   chunkBuffer = [];
   mediaRecorder = null;
-  activeMimeType = 'audio/webm';
   return remaining;
 }
 
@@ -104,12 +97,12 @@ export function flushBuffer(): Blob | null {
 }
 
 export function isCapturing(): boolean {
-  return mediaRecorder !== null && mediaRecorder.state === 'recording';
+  return mediaRecorder !== null && mediaRecorder.state === "recording";
 }
 
 function _flush(): Blob | null {
   if (chunkBuffer.length === 0) return null;
-  const blob = new Blob(chunkBuffer, { type: activeMimeType });
+  const blob = new Blob(chunkBuffer, { type: "audio/webm" });
   chunkBuffer = [];
   return blob;
 }

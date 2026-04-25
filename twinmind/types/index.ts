@@ -1,10 +1,15 @@
+export type SuggestionType =
+  | "Question to ask"
+  | "Talking point"
+  | "Answer"
+  | "Fact-check"
+  | "Clarification";
+
 export interface TranscriptChunk {
   id: string;
-  timestamp: string;
+  timestamp: string; // ISO string
   text: string;
 }
-
-export type SuggestionType = 'Question to ask' | 'Talking point' | 'Answer' | 'Fact-check' | 'Clarification';
 
 export interface Suggestion {
   type: SuggestionType;
@@ -14,14 +19,14 @@ export interface Suggestion {
 
 export interface SuggestionBatch {
   batchId: string;
-  generatedAt: string;
+  generatedAt: string; // ISO string
   suggestions: Suggestion[];
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
-  timestamp: string;
+  timestamp: string; // ISO string
 }
 
 export interface Settings {
@@ -29,9 +34,9 @@ export interface Settings {
   suggestionPrompt: string;
   detailPrompt: string;
   chatPrompt: string;
-  suggestionContextWindow: number;
+  suggestionContextWindow: number; // number of chunks
   chatContextWindow: number;
-  refreshInterval: number;
+  refreshInterval: number; // seconds
 }
 
 export interface SessionExport {

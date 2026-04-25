@@ -8,7 +8,7 @@ interface RequestBody {
   contextWindow: number;
   isSuggestionClick?: boolean;
   suggestionHeadline?: string;
-  detailedAnswerPrompt?: string;
+  detailPrompt?: string;
 }
 
 function formatTranscript(chunks: TranscriptChunk[]): string {
@@ -28,15 +28,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { messages, transcript, prompt, contextWindow, isSuggestionClick, suggestionHeadline, detailedAnswerPrompt } = body;
+  const { messages, transcript, prompt, contextWindow, isSuggestionClick, suggestionHeadline, detailPrompt } = body;
 
   const recentTranscript = formatTranscript(transcript.slice(-contextWindow));
   const fullTranscript = formatTranscript(transcript);
 
   // Build system message: detailed answer for suggestion clicks, free chat otherwise
   let systemContent: string;
-  if (isSuggestionClick && suggestionHeadline && detailedAnswerPrompt) {
-    systemContent = detailedAnswerPrompt
+  if (isSuggestionClick && suggestionHeadline && detailPrompt) {
+    systemContent = detailPrompt
       .replace('{{suggestion}}', suggestionHeadline)
       .replace('{{full_transcript}}', fullTranscript)
       .replace('{{transcript}}', recentTranscript);

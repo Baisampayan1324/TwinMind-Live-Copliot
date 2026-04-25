@@ -19,7 +19,7 @@ Types to use:
 RECENT TRANSCRIPT:
 {{transcript}}`;
 
-export const DEFAULT_DETAILED_ANSWER_PROMPT = `You are an expert AI meeting assistant providing a detailed, helpful response.
+export const DEFAULT_DETAIL_PROMPT = `You are an expert AI meeting assistant providing a detailed, helpful response.
 
 The user is in a live meeting. They clicked this suggestion: "{{suggestion}}"
 
