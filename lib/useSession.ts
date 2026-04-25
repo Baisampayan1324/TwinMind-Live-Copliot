@@ -74,7 +74,8 @@ export function useSession() {
   ]);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
-  const [isStreamingChat, setIsStreamingChat] = useState(false);
+  const [activeStreams, setActiveStreams] = useState<number>(0);
+  const isStreamingChat = activeStreams > 0;
   const [error, setError] = useState<SessionError | null>(null);
   const lastSuggestionBatchKeyRef = useRef<string>('');
 
@@ -360,7 +361,7 @@ export function useSession() {
       } catch {
         setError({ column: 'chat', message: 'Network error during chat.' });
       } finally {
-        setIsStreamingChat(false);
+        setActiveStreams(n => Math.max(0, n - 1));
       }
     },
     [chatMessages]
