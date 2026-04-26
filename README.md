@@ -22,18 +22,21 @@ A production-quality AI meeting copilot that transcribes speech in real time, su
 This release includes critical fixes for production transcription reliability:
 
 ### 🎙️ Real-Time Audio Pipeline
+
 - **Fixed timeslice chunking**: mediaRecorder now uses intelligent timeslicing (max(500, interval/2)ms) to ensure proper ondataavailable firing and valid audio headers
 - **Smart MIME type detection**: Added fallback chain (WebM Opus → WebM → OggS Opus → OggS) with try/catch handling for browser compatibility
 - **Error recovery**: Added mediaRecorder.onerror handler that auto-recovers from transient failures
 - **Race condition fix**: Clears buffer before stop() to prevent data loss
 
 ### 🧠 Stale Closure Prevention
+
 - **Fixed transcriptRef sync**: appendTranscript now synchronously updates transcriptRef inside setState callback
 - **Fixed chatMessagesRef**: sendChatMessage now uses chatMessagesRef.current to prevent stale message closures
 - **Fixed fetchSuggestions**: Removed stale parameter passing; now always uses current transcriptRef
 - **Removed forced refresh overrides**: useEffect no longer forces 8s refresh; respects user settings
 
 ### 🚫 Context Prompt Poisoning Prevention
+
 - **Reduced context scope**: Changed from 3 joined chunks → 1 chunk only, truncated to 100 chars
   - **Why**: Feeding excessive context causes Whisper to copy the prompt as output instead of transcribing
 - **Prompt deduplication detection**: Normalizes prompt + output, detects when >70% of output is contained in prompt
@@ -41,6 +44,7 @@ This release includes critical fixes for production transcription reliability:
 - **Repeated phrase detector**: Catches multi-word loops like "quarterly rain review... quarterly rain review..." using chunk comparison
 
 ### 🛡️ Hallucination Detection
+
 - **Audio header validation**: Validates WebM (EBML), OggS, MP4 (ftyp), and WAV (RIFF) magic bytes before sending to Groq
 - **Blob size pre-filtering**: Client-side early return for blobs <6KB; server-side 6KB minimum threshold
 - **Expanded patterns**: From 3 patterns → 20+ regex rules including:
@@ -85,23 +89,9 @@ This release includes critical fixes for production transcription reliability:
 
 ### Deploy to Vercel (Recommended)
 
-**Step 1: Prepare for Deployment**
+**Step 1: Complete Pre-Deployment Testing**
 
-Before deploying, test everything locally:
-
-```bash
-npm run dev
-```
-
-Checklist:
-
-- [ ] Settings modal opens and saves on first click
-- [ ] Microphone permission works in your browser
-- [ ] Transcription appears in real-time (2-3 second delay)
-- [ ] Suggestions refresh every 5 seconds
-- [ ] No duplicate suggestions appear
-- [ ] Chat streams responses smoothly
-- [ ] Export button works
+Complete the full **"Pre-Deployment Testing Checklist"** below before deploying. This ensures all features work correctly locally.
 
 **Step 2: Deploy to Vercel**
 
@@ -126,11 +116,21 @@ After deployment:
 
 1. Vercel will provide a live URL (e.g., `https://twinmind-xyz.vercel.app`)
 2. Visit the URL in your browser
-3. Run the same checklist as Step 1
+3. Run the Pre-Deployment Testing Checklist (same as Step 1) on the production URL
 4. Test with actual microphone input
 5. Verify Groq API calls work in production
 
-**Step 4: Custom Domain (Optional)**
+**Step 4: Post-Deployment Verification** (First Week)
+
+- [ ] Visit deployed Vercel URL in browser — verify HTTPS is active
+- [ ] Complete full **Pre-Deployment Testing Checklist** on production URL
+- [ ] Monitor Groq API usage dashboard at https://console.groq.com for proper rate limiting
+- [ ] Check Vercel Analytics — verify no spike in errors or failed requests
+- [ ] Test with various network speeds (use DevTools Network throttling)
+- [ ] Monitor error logs for any production issues
+- [ ] Verify page load time is <3 seconds on slow 4G connection
+
+**Step 5: Custom Domain (Optional)**
 
 If you own a domain:
 
@@ -244,6 +244,9 @@ Before running `vercel deploy`, verify everything works locally:
 - [ ] Keep recording for 5+ minutes — verify no memory leaks or slowdowns
 - [ ] Refresh page while recording — verify state is lost (as designed)
 - [ ] Close and reopen browser tab — verify settings modal appears (clean session)
+- [ ] Test with silence (pause for 5-10 seconds) — verify no false transcriptions appear
+- [ ] Test rate limiting — make many rapid recordings to trigger 429, verify error message with retry-after
+- [ ] Test browser back/forward buttons — verify app state is handled gracefully
 
 ### 8. **Browser Compatibility**
 
@@ -252,6 +255,14 @@ Test on at least one of each:
 - [ ] Chrome/Edge (Chromium-based)
 - [ ] Firefox
 - [ ] Safari (if available)
+
+### 9. **Production Readiness**
+
+- [ ] Run `npm run build` — verify no build errors
+- [ ] Run `npm run lint` (eslint) — verify no lint warnings
+- [ ] Open DevTools **Performance** tab — verify no memory leaks during 5+ minute recording
+- [ ] Monitor DevTools **Network** tab — verify API calls are properly batched every 2-5s (not per chunk)
+- [ ] Test with actual meeting audio (not synthetic) — verify real-world quality and no hallucinations
 
 ---
 
@@ -320,7 +331,7 @@ Test on at least one of each:
 
 - **Status**: ✅ Fixed. Audio header validation now ensures blobs are valid WebM/OggS/MP4/WAV before sending.
 - **What changed**: Added `hasValidAudioHeader()` function that checks magic bytes (EBML, OggS, ftyp, RIFF).
-- **If still occurring**: 
+- **If still occurring**:
   - Check browser console for `[transcribe] Invalid header` warnings
   - Verify MediaRecorder MIME type support: `console.log(MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))`
   - Try a different browser (Chrome has best Opus support)
@@ -345,7 +356,7 @@ Test on at least one of each:
 **Q: Transcription copying previous text (e.g., prompt becomes output)?**
 
 - **Status**: ✅ Fixed. Context prompt size reduced 3 chunks → 1 chunk, truncated to 100 chars.
-- **What changed**: 
+- **What changed**:
   - Changed from passing `lastChunks = transcriptRef.current.slice(-3).map(...).join(' ')`
   - To `lastChunk.slice(-100)` (last 100 chars of most recent chunk only)
 - **Why**: Feeding excessive context confuses Whisper into copying the prompt as output.
@@ -355,7 +366,7 @@ Test on at least one of each:
 
 - **Status**: ✅ Fixed. Added repeated word detector (if single word >60% of output, discard).
 - **What changed**: Server-side now checks word frequency distribution and rejects skewed outputs.
-- **Detection flow**: 
+- **Detection flow**:
   1. First 3 dedup checks (prompt copy, repeated word, repeated phrase)
   2. Then 20+ regex-based hallucination patterns
   3. Finally, minimum word length check
@@ -375,7 +386,7 @@ Test on at least one of each:
 **Q: Chat messages appearing out of order or missing?**
 
 - **Status**: ✅ Fixed. Added chatMessagesRef to prevent stale closure in sendChatMessage.
-- **What changed**: 
+- **What changed**:
   - Added `const chatMessagesRef = useRef<ChatMessage[]>([])`
   - Syncing: `chatMessagesRef.current = chatMessages`
   - Using: `messages: [...chatMessagesRef.current, userMsg]` instead of `[...chatMessages, userMsg]`
@@ -400,7 +411,7 @@ Test on at least one of each:
 **Q: Refresh intervals <5s not working?**
 
 - **Status**: ✅ Fixed. Changed Math.max(5) → Math.max(2) to allow 2s minimum.
-- **What changed**: 
+- **What changed**:
   - In updateSettings: `Math.max(5, ...) → Math.max(2, ...)`
   - In startRecording: `Math.max(5, ...) → Math.max(2, ...)`
 - **Why**: Previous code enforced 5s minimum even if user set lower value.

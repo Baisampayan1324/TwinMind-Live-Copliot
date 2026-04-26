@@ -263,13 +263,9 @@ export function useSession() {
   }, [transcribeBlob, appendTranscript, fetchSuggestions]);
 
   const stopRecording = useCallback(async () => {
-    const remaining = audioCapture.stopCapture();
+    audioCapture.stopCapture();
     setIsRecording(false);
-    if (remaining) {
-      const text = await transcribeBlob(remaining);
-      if (text) appendTranscript(text);
-    }
-  }, [transcribeBlob, appendTranscript]);
+  }, []);
 
   // Manual refresh: flush current audio buffer → transcribe → suggest
   const manualRefresh = useCallback(async () => {
