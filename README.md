@@ -17,13 +17,49 @@ A production-quality AI meeting copilot that transcribes speech in real time, su
 - **Inference**: Groq Cloud API (Whisper + Llama 3.3).
 - **Audio**: Web MediaRecorder API with 2-second chunk intervals for real-time transcription.
 
+## Recent Production Fixes (v0.1.0)
+
+This release includes critical fixes for production transcription reliability:
+
+### 🎙️ Real-Time Audio Pipeline
+- **Fixed timeslice chunking**: mediaRecorder now uses intelligent timeslicing (max(500, interval/2)ms) to ensure proper ondataavailable firing and valid audio headers
+- **Smart MIME type detection**: Added fallback chain (WebM Opus → WebM → OggS Opus → OggS) with try/catch handling for browser compatibility
+- **Error recovery**: Added mediaRecorder.onerror handler that auto-recovers from transient failures
+- **Race condition fix**: Clears buffer before stop() to prevent data loss
+
+### 🧠 Stale Closure Prevention
+- **Fixed transcriptRef sync**: appendTranscript now synchronously updates transcriptRef inside setState callback
+- **Fixed chatMessagesRef**: sendChatMessage now uses chatMessagesRef.current to prevent stale message closures
+- **Fixed fetchSuggestions**: Removed stale parameter passing; now always uses current transcriptRef
+- **Removed forced refresh overrides**: useEffect no longer forces 8s refresh; respects user settings
+
+### 🚫 Context Prompt Poisoning Prevention
+- **Reduced context scope**: Changed from 3 joined chunks → 1 chunk only, truncated to 100 chars
+  - **Why**: Feeding excessive context causes Whisper to copy the prompt as output instead of transcribing
+- **Prompt deduplication detection**: Normalizes prompt + output, detects when >70% of output is contained in prompt
+- **Repeated word detector**: Catches "January January January" patterns (single word >60% of output)
+- **Repeated phrase detector**: Catches multi-word loops like "quarterly rain review... quarterly rain review..." using chunk comparison
+
+### 🛡️ Hallucination Detection
+- **Audio header validation**: Validates WebM (EBML), OggS, MP4 (ftyp), and WAV (RIFF) magic bytes before sending to Groq
+- **Blob size pre-filtering**: Client-side early return for blobs <6KB; server-side 6KB minimum threshold
+- **Expanded patterns**: From 3 patterns → 20+ regex rules including:
+  - Filler word loops (so, okay, uh, um, etc.)
+  - Punctuation-only responses
+  - Single character/short responses
+  - Common silence hallucinations
+  - Repeated word/phrase patterns
+  - Subtitle and caption artifacts
+- **Rate limit handling**: Added 429 handling with retry-after header passthrough
+- **Prompt truncation**: Limited to 800 chars to prevent API size errors
+
 ## Setup
 
 1. **Clone & Install**:
 
    ```bash
-   git clone https://github.com/Baisampayan1324/Live-Suggestion.git
-   cd live-suggestion
+   git clone https://github.com/Baisampayan1324/TwinMind-Live-Copliot.git
+   cd TwinMind-Live-Copliot
    npm install
    ```
 
@@ -41,7 +77,7 @@ A production-quality AI meeting copilot that transcribes speech in real time, su
 
 4. **Start Recording**:
    - Click the **Microphone** icon to begin recording.
-   - Transcription will appear in real-time as you speak.
+   - Transcription will appear in real-time as you speak (2-3 second delay).
    - Suggestions will refresh automatically every 5 seconds with new, non-duplicate recommendations.
    - Click any suggestion card for a detailed answer, or ask questions in the chat panel.
 
@@ -81,14 +117,14 @@ During deployment, Vercel will ask:
 
 - **Which scope?** → Choose your account
 - **Link to existing project?** → Press `N` (new project)
-- **Project name?** → `live-suggestion`
+- **Project name?** → `twinmind-live-copilot`
 - **Which directory?** → Press Enter (default = current directory)
 
 **Step 3: Verify Deployment**
 
 After deployment:
 
-1. Vercel will provide a live URL (e.g., `https://live-suggestion-xyz.vercel.app`)
+1. Vercel will provide a live URL (e.g., `https://twinmind-xyz.vercel.app`)
 2. Visit the URL in your browser
 3. Run the same checklist as Step 1
 4. Test with actual microphone input
@@ -275,6 +311,100 @@ Test on at least one of each:
 **Q: Settings modal closing unexpectedly?**
 
 - This was fixed. Settings now save and close on first click of "Save and Continue".
+
+## Troubleshooting Recent Fixes (v0.1.0)
+
+### Audio Pipeline Issues
+
+**Q: "Not a valid media file" errors from Groq?**
+
+- **Status**: ✅ Fixed. Audio header validation now ensures blobs are valid WebM/OggS/MP4/WAV before sending.
+- **What changed**: Added `hasValidAudioHeader()` function that checks magic bytes (EBML, OggS, ftyp, RIFF).
+- **If still occurring**: 
+  - Check browser console for `[transcribe] Invalid header` warnings
+  - Verify MediaRecorder MIME type support: `console.log(MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))`
+  - Try a different browser (Chrome has best Opus support)
+
+**Q: Silence producing empty suggestions?**
+
+- **Status**: ✅ Fixed. Blobs <6KB (typically 2-5s silence) are now filtered client-side before API call.
+- **What changed**: Added `if (blob.size < 6000) return;` in startRecording's onChunk callback.
+- **Why 6KB?**: Silence at 2s produces ~3-5KB of empty WebM. 6KB threshold ensures only real audio is transcribed.
+
+**Q: "Rate limited" errors (HTTP 429)?**
+
+- **Status**: ✅ Fixed. 429 responses now include retry-after header passthrough.
+- **What changed**: Added 429 handler that extracts retry-after and returns to client.
+- **If occurring**:
+  - Reduce refresh interval in Settings (currently 2-5s)
+  - Or increase Groq plan at https://console.groq.com/keys
+  - App will show error message with retry delay
+
+### Hallucination & Transcription Quality
+
+**Q: Transcription copying previous text (e.g., prompt becomes output)?**
+
+- **Status**: ✅ Fixed. Context prompt size reduced 3 chunks → 1 chunk, truncated to 100 chars.
+- **What changed**: 
+  - Changed from passing `lastChunks = transcriptRef.current.slice(-3).map(...).join(' ')`
+  - To `lastChunk.slice(-100)` (last 100 chars of most recent chunk only)
+- **Why**: Feeding excessive context confuses Whisper into copying the prompt as output.
+- **Detection**: Server-side now detects when output is >70% contained in prompt and discards.
+
+**Q: "January January January" or repeated word hallucinations?**
+
+- **Status**: ✅ Fixed. Added repeated word detector (if single word >60% of output, discard).
+- **What changed**: Server-side now checks word frequency distribution and rejects skewed outputs.
+- **Detection flow**: 
+  1. First 3 dedup checks (prompt copy, repeated word, repeated phrase)
+  2. Then 20+ regex-based hallucination patterns
+  3. Finally, minimum word length check
+
+**Q: Filler word responses ("so, so, so" or "um um um")?**
+
+- **Status**: ✅ Fixed. Expanded hallucination patterns to 20+ rules, including filler loops.
+- **What changed**: Added regex `/^(\s*(so|okay|ok|and|or|...|hmm)\s*[,.\-!?]*\s*){1,6}$/i` to catch 1-6 filler word repetitions.
+
+**Q: Subtitle artifacts appearing ("Subtitles by..." or "[Inaudible]")?**
+
+- **Status**: ✅ Fixed. Added patterns to detect and discard subtitle/caption artifacts.
+- **Patterns**: `^\[.*\]$`, `^\(.*\)$`, `/^subtitles by/i`, `/^transcribed by/i`
+
+### Stale Closure / State Issues
+
+**Q: Chat messages appearing out of order or missing?**
+
+- **Status**: ✅ Fixed. Added chatMessagesRef to prevent stale closure in sendChatMessage.
+- **What changed**: 
+  - Added `const chatMessagesRef = useRef<ChatMessage[]>([])`
+  - Syncing: `chatMessagesRef.current = chatMessages`
+  - Using: `messages: [...chatMessagesRef.current, userMsg]` instead of `[...chatMessages, userMsg]`
+- **Why**: React closures capture state at callback creation time; refs always have fresh values.
+
+**Q: Suggestions not updating after transcription?**
+
+- **Status**: ✅ Fixed. Removed stale transcript parameter from fetchSuggestions.
+- **What changed**:
+  - Changed: `fetchSuggestions([...transcriptRef.current, newChunk])`
+  - To: `fetchSuggestions()` which uses `transcriptRef.current` internally
+- **Why**: Passing stale arrays caused mismatched suggestion context.
+
+**Q: Manual refresh not working?**
+
+- **Status**: ✅ Fixed. manualRefresh now calls flushBuffer() then fetchSuggestions().
+- **What changed**: Removed blob handling from manualRefresh (flushBuffer is now void).
+- **Note**: flushBuffer() calls mediaRecorder.requestData() + stop(), which triggers normal onstop → onChunkCb flow.
+
+### Refresh Interval Issues
+
+**Q: Refresh intervals <5s not working?**
+
+- **Status**: ✅ Fixed. Changed Math.max(5) → Math.max(2) to allow 2s minimum.
+- **What changed**: 
+  - In updateSettings: `Math.max(5, ...) → Math.max(2, ...)`
+  - In startRecording: `Math.max(5, ...) → Math.max(2, ...)`
+- **Why**: Previous code enforced 5s minimum even if user set lower value.
+- **Note**: Removed useEffect override that forced 8s refresh; now respects user settings.
 
 ---
 
