@@ -81,17 +81,15 @@ export function useSession() {
 
   // Refs to always have latest values inside callbacks
   const transcriptRef = useRef<TranscriptChunk[]>([]);
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
   const settingsRef = useRef<Settings>(DEFAULT_SETTINGS);
   transcriptRef.current = transcript;
+  chatMessagesRef.current = chatMessages;
   settingsRef.current = settings;
 
   // Load settings from sessionStorage on mount
   useEffect(() => {
     const s = loadSettings();
-    // Default to 8s for a faster live experience if not set
-    if (!s.refreshInterval || s.refreshInterval === 5) {
-      s.refreshInterval = 8;
-    }
     setSettings(s);
   }, []);
 
@@ -105,7 +103,7 @@ export function useSession() {
         const next = {
           ...prev,
           ...partial,
-          refreshInterval: Math.max(5, Number(partial.refreshInterval ?? prev.refreshInterval) || 8),
+          refreshInterval: Math.max(2, Number(partial.refreshInterval ?? prev.refreshInterval) || 5),
         };
         saveSettings(next);
         return next;
@@ -165,14 +163,18 @@ export function useSession() {
       timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
       text: text.trim(),
     };
-    setTranscript((prev) => [...prev, chunk]);
+    setTranscript((prev) => {
+      const next = [...prev, chunk];
+      transcriptRef.current = next;
+      return next;
+    });
     return chunk;
   }, []);
 
   // ─── Suggestions ───────────────────────────────────────────────────────────
-  const fetchSuggestions = useCallback(async (latestTranscript?: TranscriptChunk[]) => {
+  const fetchSuggestions = useCallback(async () => {
     const s = settingsRef.current;
-    const t = latestTranscript ?? transcriptRef.current;
+    const t = transcriptRef.current;
     if (!s.apiKey || t.length === 0) return;
 
     setIsLoadingSuggestions(true);
@@ -230,16 +232,21 @@ export function useSession() {
 
     setIsMicPending(true);
     try {
-      const intervalMs = Math.max(5, Number(s.refreshInterval) || 8) * 1000;
+      const intervalMs = Math.max(2, Number(s.refreshInterval) || 5) * 1000;
       await audioCapture.startCapture(
         async (blob: Blob) => {
-          // Get last 3 chunks as prompt for context
-          const lastChunks = transcriptRef.current.slice(-3).map(c => c.text).join(' ');
-          const text = await transcribeBlob(blob, lastChunks);
+          // Skip near-silence blobs early
+          if (blob.size < 6000) return;
+          
+          // Use only the LAST chunk as prompt (not 3), and truncate to 100 chars.
+          // Feeding too much context causes Whisper to copy the prompt as output.
+          const lastChunk = transcriptRef.current.slice(-1)[0]?.text ?? '';
+          const contextHint = lastChunk.slice(-100); // last 100 chars only
+          const text = await transcribeBlob(blob, contextHint || undefined);
           if (text) {
             const newChunk = appendTranscript(text);
             if (newChunk) {
-              await fetchSuggestions([...transcriptRef.current, newChunk]);
+              await fetchSuggestions();
             }
           }
         },
@@ -266,17 +273,9 @@ export function useSession() {
 
   // Manual refresh: flush current audio buffer → transcribe → suggest
   const manualRefresh = useCallback(async () => {
-    const blob = audioCapture.flushBuffer();
-    let latestT = transcriptRef.current;
-    if (blob) {
-      const text = await transcribeBlob(blob);
-      if (text) {
-        const newChunk = appendTranscript(text);
-        if (newChunk) latestT = [...transcriptRef.current, newChunk];
-      }
-    }
-    await fetchSuggestions(latestT);
-  }, [transcribeBlob, appendTranscript, fetchSuggestions]);
+    audioCapture.flushBuffer();
+    await fetchSuggestions();
+  }, [fetchSuggestions]);
 
   // ─── Chat ──────────────────────────────────────────────────────────────────
   const sendChatMessage = useCallback(
@@ -305,7 +304,7 @@ export function useSession() {
             'X-Groq-Key': s.apiKey,
           },
           body: JSON.stringify({
-            messages: [...chatMessages, userMsg],
+            messages: [...chatMessagesRef.current, userMsg],
             transcript: t,
             prompt: s.chatPrompt,
             contextWindow: s.chatContextWindow,
@@ -364,7 +363,7 @@ export function useSession() {
         setActiveStreams(n => Math.max(0, n - 1));
       }
     },
-    [chatMessages]
+    []
   );
 
   const clickSuggestion = useCallback(

@@ -11,12 +11,27 @@ let chunkBuffer: Blob[] = [];
 let onChunkCb: OnChunkCallback | null = null;
 let activeMimeType = 'audio/webm';
 let captureActive = false;
-let currentIntervalMs = 30000;
+let currentIntervalMs = 2000;
 let stopTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+function getBestMimeType(): string {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+  ];
+  for (const mimeType of candidates) {
+    if (MediaRecorder.isTypeSupported(mimeType)) {
+      return mimeType;
+    }
+  }
+  return 'audio/webm';
+}
 
 export async function startCapture(
   onChunk: OnChunkCallback,
-  intervalMs: number = 30000
+  intervalMs: number = 2000
 ): Promise<void> {
   if (captureActive) return;
 
@@ -41,17 +56,28 @@ export async function startCapture(
 function _initRecorder() {
   if (!captureActive || !stream) return;
 
-  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-    ? 'audio/webm;codecs=opus'
-    : 'audio/webm';
+  const mimeType = getBestMimeType();
 
-  mediaRecorder = new MediaRecorder(stream, { mimeType });
+  try {
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+  } catch {
+    mediaRecorder = new MediaRecorder(stream);
+  }
+
   activeMimeType = mediaRecorder.mimeType;
   chunkBuffer = [];
 
   mediaRecorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) {
       chunkBuffer.push(e.data);
+    }
+  };
+
+  mediaRecorder.onerror = (e) => {
+    console.error(`[audioCapture] MediaRecorder error: ${e.error}`);
+    chunkBuffer = [];
+    if (captureActive) {
+      setTimeout(_initRecorder, 200);
     }
   };
 
@@ -74,7 +100,8 @@ function _initRecorder() {
     }
   };
 
-  mediaRecorder.start();
+  const timeslice = Math.max(500, Math.floor(currentIntervalMs / 2));
+  mediaRecorder.start(timeslice);
 
   // Schedule the next stop
   stopTimeoutHandle = setTimeout(() => {
@@ -84,12 +111,13 @@ function _initRecorder() {
   }, currentIntervalMs);
 }
 
-export function stopCapture(): Blob | null {
+export function stopCapture(): void {
   captureActive = false;
   if (stopTimeoutHandle) {
     clearTimeout(stopTimeoutHandle);
     stopTimeoutHandle = null;
   }
+  chunkBuffer.splice(0);
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
   }
@@ -97,17 +125,14 @@ export function stopCapture(): Blob | null {
     stream.getTracks().forEach((t) => t.stop());
     stream = null;
   }
-  const remaining = chunkBuffer.length > 0 ? new Blob(chunkBuffer, { type: activeMimeType }) : null;
-  chunkBuffer = [];
   mediaRecorder = null;
-  return remaining;
 }
 
-export function flushBuffer(): Blob | null {
+export function flushBuffer(): void {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop(); // Triggers onstop -> onChunkCb
+    mediaRecorder.requestData();
+    mediaRecorder.stop();
   }
-  return null;
 }
 
 export function isCapturing(): boolean {
