@@ -126,13 +126,13 @@ export async function POST(req: NextRequest) {
     }
 
     // FIX: Detect repeated word/phrase pattern (catches "January January January")
-    // Split into words, check if any single word makes up >60% of the output
+    // Split into words, check if any single word makes up >50% of the output (lowered from 60%)
     if (text && text.trim().split(/\s+/).length >= 3) {
       const words = text.trim().toLowerCase().split(/\s+/);
       const freq: Record<string, number> = {};
       for (const w of words) freq[w] = (freq[w] ?? 0) + 1;
       const maxFreq = Math.max(...Object.values(freq));
-      if (maxFreq / words.length > 0.6) {
+      if (maxFreq / words.length > 0.5) {
         console.warn('[transcribe] Repeated word hallucination, discarding:', text);
         return NextResponse.json({ text: '' });
       }
@@ -167,6 +167,11 @@ export async function POST(req: NextRequest) {
 
       // Single characters or numbers
       /^.{0,2}$/,
+
+      // Common repeated phrases (catches "I'm sorry, I'm sorry" etc)
+      /^(i'?m\s+(sorry|afraid|not\s+sure)[,.\s]*){2,}$/i,
+      /^(that's\s+(right|correct|true)[,.\s]*){2,}$/i,
+      /^(you['\s]+(know|see)[,.\s]*){2,}$/i,
 
       // Common Whisper silence hallucinations
       /^thank you[.\s]*$/i,
